@@ -537,23 +537,21 @@ protected:
                 password->c_str(),
                 nullptr))
             {
-                return;
+                // If it fails for some reason we go back to the old behavior.
+                DWORD data = WINHTTP_AUTOLOGON_SECURITY_LEVEL_HIGH;
+
+                auto result = WinHttpSetOption(
+                    winhttp_context->m_request_handle,
+                    WINHTTP_OPTION_AUTOLOGON_POLICY,
+                    &data,
+                    sizeof(data));
+                if (!result)
+                {
+                    auto errorCode = GetLastError();
+                    request->report_error(errorCode, build_error_msg(errorCode, "Setting autologon policy to WINHTTP_AUTOLOGON_SECURITY_LEVEL_HIGH"));
+                    return;
+                }
             }
-
-
-            //DWORD data = WINHTTP_AUTOLOGON_SECURITY_LEVEL_HIGH;
-
-            //auto result = WinHttpSetOption(
-            //    winhttp_context->m_request_handle,
-            //    WINHTTP_OPTION_AUTOLOGON_POLICY,
-            //    &data,
-            //    sizeof(data));
-            //if(!result)
-            //{
-            //    auto errorCode = GetLastError();
-            //    request->report_error(errorCode, build_error_msg(errorCode, "Setting autologon policy to WINHTTP_AUTOLOGON_SECURITY_LEVEL_HIGH"));
-            //    return;
-            //}
         }
 
         // Check to turn off server certificate verification.
