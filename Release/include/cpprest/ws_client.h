@@ -25,8 +25,9 @@
 #ifndef _CASA_WS_CLIENT_H
 #define _CASA_WS_CLIENT_H
 
-// Include on everything except VS2015 and Windows Desktop ARM, unless explicitly excluded.
-#if !defined(_MSC_VER) || ((_MSC_VER < 1900) && (defined(__cplusplus_winrt) || !defined(__cplusplus_winrt) && !defined(_M_ARM))) && !defined(CPPREST_EXCLUDE_WEBSOCKETS)
+#include "cpprest/details/basic_types.h"
+
+#if !defined(CPPREST_EXCLUDE_WEBSOCKETS)
 
 #include <memory>
 #include <limits>
@@ -37,7 +38,6 @@
 #include "cpprest/uri.h"
 #include "cpprest/details/web_utilities.h"
 #include "cpprest/http_headers.h"
-#include "cpprest/details/basic_types.h"
 #include "cpprest/asyncrt_utils.h"
 #include "cpprest/ws_msg.h"
 
