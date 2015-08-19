@@ -425,7 +425,17 @@ void http_windows_server::receive_requests()
 {
     HTTP_REQUEST p_request;
     ULONG bytes_received;
-    for(;;)
+
+    // Oversubscribe since this is a blocking call and we don't want to count
+    // towards the concurrency runtime's thread count. A more proper fix
+    // would be to use Overlapped I/O and asynchronously call HttpReceiveHttpRequest.
+    // This requires additional work to be careful sychronizing with the listener
+    // shutdown. This is much easier especially given the http_listener is 'experimental'
+    // and with VS2015 PPL tasks run on the threadpool.
+#if _MSC_VER < 1900
+    concurrency::Context::Oversubscribe(true);
+#endif
+    for (;;)
     {
         unsigned long error_code = HttpReceiveHttpRequest(
             m_hRequestQueue,
@@ -436,7 +446,7 @@ void http_windows_server::receive_requests()
             &bytes_received,
             0);
 
-        if(error_code != NO_ERROR && error_code != ERROR_MORE_DATA)
+        if (error_code != NO_ERROR && error_code != ERROR_MORE_DATA)
         {
             break;
         }
@@ -447,6 +457,9 @@ void http_windows_server::receive_requests()
         http_request msg = http_request::_create_request(std::move(pRequestContext));
         pContext->async_process_request(p_request.RequestId, msg, bytes_received);
     }
+#if _MSC_VER < 1900
+    concurrency::Context::Oversubscribe(false);
+#endif
 }
 
 pplx::task<void> http_windows_server::respond(http::http_response response)
@@ -531,16 +544,21 @@ void windows_request_context::read_headers_io_completion(DWORD error_code, DWORD
     }
     else
     {
-        // Parse headers.
-        // CookedUrl.pFullUrl contains the canonicalized URL and it is not encoded
-        // However, Query strings are opaque to http.sys and are passed as-is => CookedUrl.pFullUrl
-        // contains an already encoded version of query string.
-        uri_builder builder(uri::encode_uri(m_request->CookedUrl.pFullUrl));
-        if (m_request->CookedUrl.QueryStringLength != 0)
+        std::string badRequestMsg;
+        try
         {
-            builder.set_query(uri::decode(builder.query()));
+            // HTTP_REQUEST::pRawUrl contains the raw URI that came across the wire.
+            // Use this instead since the CookedUrl is a mess of the URI components
+            // some encoded and some not.
+            m_msg.set_request_uri(utf8_to_utf16(m_request->pRawUrl));
         }
-        m_msg.set_request_uri(builder.to_uri());
+        catch(const uri_exception &e)
+        {
+            // If an exception occurred, finish processing the request below but
+            // respond with BadRequest instead of dispatching to the user's
+            // request handlers.
+            badRequestMsg = e.what();
+        }
         m_msg.set_method(parse_request_method(m_request));
         parse_http_headers(m_request->Headers, m_msg.headers());
 
@@ -549,7 +567,14 @@ void windows_request_context::read_headers_io_completion(DWORD error_code, DWORD
         read_request_body_chunk();
 
         // Dispatch request to the http_listener.
-        dispatch_request_to_listener((web::http::experimental::listener::details::http_listener_impl *)m_request->UrlContext);
+        if(badRequestMsg.empty())
+        {
+            dispatch_request_to_listener((web::http::experimental::listener::details::http_listener_impl *)m_request->UrlContext);
+        }
+        else
+        {
+            m_msg.reply(status_codes::BadRequest, badRequestMsg);
+        }
     }
 }
 
